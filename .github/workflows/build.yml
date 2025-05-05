@@ -1,0 +1,84 @@
+---
+name: Package
+"on":
+  push:
+    tags:
+      - v*
+  workflow_call:
+jobs:
+  package:
+    name: Patch and Package
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:42
+      options: --user root
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+    
+    - name: Install Python
+      run: dnf install -y python3
+    
+    - name: Run the build and patch process
+      run: python3 build.py
+    
+    - uses: actions/upload-artifact@v4
+      with:
+        name: packages
+        path: pam_mount/x86_64/*
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: src
+        path: pam_mount/*.rpm
+
+  release:
+    name: Release the package
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:42
+      options: --user root
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      contents: write
+      pages: write      # to deploy to Pages
+      id-token: write   # to verify the deployment originates from an appropriate source
+    needs:
+      - package
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: packages
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: src
+          path: pam_mount
+
+      - name: Install createrepo
+        run: dnf install -y createrepo_c
+
+      - name: Build repo
+        run: |
+          mkdir -p repo
+          createrepo_c -o repo -u https://github.com/wrouesnel/pam_mount-pkg/releases/download/v1/ packages
+
+      - name: Upload repo as pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: repo/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: |
+            packages/*.rpm
